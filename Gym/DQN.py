@@ -122,13 +122,14 @@ class DQNAgent:
             target = reward + GAMMA * max_next_q
 
             # Compute loss for this experience
-            loss += (q_value - target) ** 2
+            loss += (target - q_value) 
 
-        # Average the loss over the batch
+        #delayed loss update
+        loss = loss ** 2
         loss /= batch_size
-        self.optimizer.zero_grad()  # Clear gradients for both Q-network and embedding model
-        loss.backward()  # Backpropagate to update parameters
-        self.optimizer.step()  # Update both Q-network and embedding model parameters
+        self.optimizer.zero_grad() 
+        loss.backward()  # Backpropagate to update neural network parameters
+        self.optimizer.step()  # Update alpha and beta
 
     def add_experience(self, state, action, reward, next_state):
         state_copy = state.clone().detach()
@@ -161,10 +162,10 @@ def train_agent(agent, env, episodes, batch_size):
                 if (env.embed.graph.labels[i]!=1):
                     valid_nodes.append(i)
 
-            # Select an action using the agent's policy
+            # Select an action 
             action = agent.select_action(valid_nodes)
 
-            # Apply the action in the environment
+            # Apply the action 
             next_state, reward, done, _ = env.step(action)
 
             # Add the experience to the replay buffer
