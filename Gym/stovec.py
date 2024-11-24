@@ -22,7 +22,7 @@ class Embed(nn.Module):
         self.alpha4 = nn.Parameter(torch.rand(1))
 
         # Initialize node embeddings as zero vectors
-        self.cur_embed = nn.Parameter(torch.zeros(self.graph.num_nodes, embed_dim))
+        self.cur_embed = torch.zeros(self.graph.num_nodes, embed_dim)
 
     def update(self):
         """
