@@ -2,9 +2,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from custom_graph import Graph
+import copy
 
 class Embed(nn.Module):
-    def __init__(self, graph, embed_dim=32, num_iterations=4):
+    def __init__(self, graph, alphas, embed_dim=32, num_iterations=4):
         
         #embed_dim is q in the DISCO article. Currently arbitrary
         #graph contains number of nodes, a 2d adj vector, and a label list for seed state
@@ -15,21 +16,26 @@ class Embed(nn.Module):
         self.num_iterations = num_iterations
         self.embed_dim = embed_dim
 
-        # Initialize trainable parameters (alphas)
-        self.alpha1 = nn.Parameter(torch.rand(1))
-        self.alpha2 = nn.Parameter(torch.rand(1))
-        self.alpha3 = nn.Parameter(torch.rand(1))
-        self.alpha4 = nn.Parameter(torch.rand(1))
+        self.alpha1, self.alpha2, self.alpha3, self.alpha4 = alphas
 
         # Initialize node embeddings as zero vectors
-        self.cur_embed = torch.zeros(self.graph.num_nodes, embed_dim)
+        self.cur_embed = torch.zeros(self.graph.num_nodes, self.embed_dim).to(self.alpha1.device)
+    
+    def re_init(self):
+        self.graph.labels = [0] * self.graph.num_nodes
+        self.cur_embed = torch.zeros(self.graph.num_nodes, self.embed_dim).to(self.alpha1.device)
 
+    def copy_emb(self):
+        new_emb = Embed(copy.deepcopy(self.graph), (self.alpha1, self.alpha2, self.alpha3, self.alpha4))
+        new_emb.cur_embed = self.cur_embed.clone().detach()
+        return new_emb
+     
     def update(self):
         """
         update the embeddings based on the graph structure.
         """
         num_nodes = self.graph.num_nodes
-        labels = torch.tensor(self.graph.labels, dtype=torch.float32)  
+        labels = torch.tensor(self.graph.labels, dtype=torch.float32).to(self.alpha1.device)
         x = self.cur_embed  
 
         # Iteratively update embeddings
@@ -55,4 +61,4 @@ class Embed(nn.Module):
             
             x = new_x  # Update embeddings
 
-        return x
+        self.cur_embed = x

@@ -3,11 +3,13 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 import random
+import os
 from collections import deque
 
 from custom_graph import Graph
 from stovec import Embed
-import gymenv
+from gymenv import CustomEnv
+from simulator import simulate
 
 #hyperparameters
 REPLAY_CAPACITY = 2000
@@ -43,7 +45,7 @@ class QNet(nn.Module):
 
 class DQNAgent:
 
-    def __init__(self, embed, embed_dim=32):
+    def __init__(self, embed_dim=32):
         """
         Initializes the DQN agent.
         Args:
@@ -51,18 +53,25 @@ class DQNAgent:
             graph: The graph object containing adjacency and labels.
             embed_dim: Dimensionality of node embeddings.
         """
-        self.embed = embed  
         self.replay_buffer = deque(maxlen=REPLAY_CAPACITY)
         self.embed_dim = embed_dim
         
         # OPTIMIZER: trains both alphas and betas
         self.q_network = QNet(embed_dim)
+        
+        self.alpha1 = nn.Parameter(torch.rand(1))
+        self.alpha2 = nn.Parameter(torch.rand(1))
+        self.alpha3 = nn.Parameter(torch.rand(1))
+        self.alpha4 = nn.Parameter(torch.rand(1))
+        self.shared_alphas = [self.alpha1, self.alpha2, self.alpha3, self.alpha4]
+
+        # Optimizer trains both QNet and shared betas
         self.optimizer = optim.Adam(
-            list(self.q_network.parameters()) + list(self.embed.parameters()), 
+            list(self.q_network.parameters()) + self.shared_alphas, 
             lr=LR
         )
 
-    def select_action(self, valid_nodes):
+    def select_action(self, env, valid_nodes):
         """
         Args:
             valid_nodes: List of node indices that are not yet in the seed set.
@@ -71,7 +80,7 @@ class DQNAgent:
         """
 
         # Compute the current embeddings
-        current_embeddings = self.embed.cur_embed
+        current_embeddings = env.embed.cur_embed
         agg_embed = current_embeddings.sum(dim=0)  # Sum of all node embeddings
 
         if random.random() < EPSILON:
@@ -103,26 +112,26 @@ class DQNAgent:
 
         for state, action, reward, next_state in batch:
 
-            agg_embed = state.sum(dim=0)  # Aggregate embedding for state
-            node_embed = state[action]  # Embedding of the selected action node
+            agg_embed = state.cur_embed.sum(dim=0)  # Aggregate embedding for state
+            node_embed = state.cur_embed[action]  # Embedding of the selected action node
 
             # Compute Q(s, a) for the current state-action pair
             q_value = self.q_network(node_embed.unsqueeze(0), agg_embed.unsqueeze(0))
 
             # Compute embeddings for the next state
 
-            next_agg_embed = next_state.sum(dim=0)
+            next_agg_embed = next_state.cur_embed.sum(dim=0)
 
             # Compute the target Q-value using max_a' Q(s', a')
             max_next_q = max(
                 self.q_network(next_state.cur_embed[v].unsqueeze(0), next_agg_embed.unsqueeze(0))
-                for v in range(self.graph.num_nodes) if next_state.graph.labels[v] != 1
+                for v in range(state.graph.num_nodes) if next_state.graph.labels[v] != 1
             )
 
             target = reward + GAMMA * max_next_q
 
             # Compute loss for this experience
-            loss += (target - q_value) 
+            loss += (target - q_value)
 
         #delayed loss update
         loss = loss ** 2
@@ -132,9 +141,41 @@ class DQNAgent:
         self.optimizer.step()  # Update alpha and beta
 
     def add_experience(self, state, action, reward, next_state):
-        state_copy = state.clone().detach()
-        next_state_copy = next_state.clone().detach()
+        state_copy = state.copy_emb()
+        next_state_copy = next_state.copy_emb()
         self.replay_buffer.append((state_copy, action, reward, next_state_copy))
+
+    def evaluate(self, env, budget):
+        env.embed.update()
+
+        agg_embed = env.embed.cur_embed.sum(dim=0) 
+        #NODE NUMBER MUST START WITH ZERO!
+        q_list = []
+        for v in range(env.embed.graph.num_nodes):
+            node_embed = env.embed.cur_embed[v]
+            q_value = self.q_network(node_embed.unsqueeze(0), agg_embed.unsqueeze(0)).item()
+            q_list.append((q_value,v))
+        q_list.sort(reverse=True)
+
+        for (q,v) in q_list:
+            if budget<=0:
+                break
+            env.embed.graph.labels[v] = 1
+            budget-=1
+        
+        print(simulate(env.embed.graph,100))
+        env.reset()
+    
+    def random_select(self, env):
+        env.embed.update()
+        random_numbers = random.sample(range(500), 10)
+        for i in random_numbers:
+            env.embed.graph.labels[i] = 1
+        print(simulate(env.embed.graph,100))
+        env.reset()
+    
+
+        
 
 
 def train_agent(agent, env, episodes, batch_size):
@@ -158,18 +199,20 @@ def train_agent(agent, env, episodes, batch_size):
         while not done:
             # Get the valid nodes (not yet selected)
             valid_nodes = [i for i, label in enumerate(env.embed.graph.labels) if label == 0]
-            for i in range(env.embed.graph.num_nodes):
-                if (env.embed.graph.labels[i]!=1):
-                    valid_nodes.append(i)
+
+            
+            #for i in range(env.embed.graph.num_nodes):
+            #   if (env.embed.graph.labels[i]!=1):
+            #        valid_nodes.append(i)
 
             # Select an action 
-            action = agent.select_action(valid_nodes)
+            action = agent.select_action(env, valid_nodes)
 
             # Apply the action 
             next_state, reward, done, _ = env.step(action)
 
             # Add the experience to the replay buffer
-            agent.add_experience(state.cur_embed, action, reward, next_state.cur_embed)
+            agent.add_experience(state, action, reward, next_state)
 
             # Train the agent
             agent.train(batch_size)
@@ -180,5 +223,53 @@ def train_agent(agent, env, episodes, batch_size):
 
         # Log episode performance
         print(f"Episode {episode + 1}/{episodes} - Total Reward: {episode_reward}")
+
+    agent.replay_buffer.clear()
+    torch.save({
+        'q_network_state_dict': agent.q_network.state_dict(),
+        'shared_alphas_state_dict': {f'alpha{i+1}': alpha for i, alpha in enumerate(agent.shared_alphas)}
+    }, 'C:\\Users\\17789\\Desktop\\Graph Dataset\\DQN_agent.pth')
+
+def main():
+    input_file = 'C:\\Users\\17789\\Desktop\\Graph Dataset\\subgraph1.txt'
+    adj_list = {}
+
+    for i in range(501): adj_list[i]= []
+
+    with open(input_file, 'r') as file:
+        for line in file:
+            u, v, weight = line.strip().split()  # Split into u, v, and weight
+            u, v = int(u), int(v)  # Convert node IDs to integers
+            weight = float(weight)  # Convert weight to float
+            
+            if u not in adj_list:
+                adj_list[u] = []
+            adj_list[u].append((v, weight))  # Add edge with weight
+
+    # Create a Graph object with the adjacency list
+    graph = Graph(501, adj_list)
+    
+
+    agent = DQNAgent()
+
+    if os.path.exists('C:\\Users\\17789\\Desktop\\Graph Dataset\\DQN_agent.pth'):
+        print("Loading pre-trained agent...")
+        checkpoint = torch.load('C:\\Users\\17789\\Desktop\\Graph Dataset\\DQN_agent.pth')
+        agent.q_network.load_state_dict(checkpoint['q_network_state_dict'])
+    
+        # Restore shared alphas
+        shared_alphas_state_dict = checkpoint['shared_alphas_state_dict']
+        for i, alpha in enumerate(agent.shared_alphas):
+            alpha.copy_(shared_alphas_state_dict[f'alpha{i+1}'])
+    else:
+        print("No pre-trained agent found. Creating a new agent...")
+    env = CustomEnv(graph, agent.shared_alphas, 10)
+
+    print(agent.random_select(env))
+    train_agent(agent, env, 30, 5)    
+
+
+if __name__ == "__main__":
+    main()
 
 

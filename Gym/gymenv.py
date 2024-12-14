@@ -1,13 +1,14 @@
 import gym
 from gym import spaces
 import numpy as np
+import torch
 from custom_graph import Graph
 from stovec import Embed
 from simulator import simulate
 
 class CustomEnv(gym.Env):
 
-    def __init__(self, graph, budget):
+    def __init__(self, graph, alphas, budget):
         super(CustomEnv, self).__init__()
 
         #how many nodes can current seed set influence
@@ -19,7 +20,7 @@ class CustomEnv(gym.Env):
         self.num_step = 0
 
         #embeddings (2d vector representation of the graph)
-        self.embed = Embed(graph)
+        self.embed = Embed(graph,alphas)
 
         #action = change the state of a node
         self.action_space = spaces.Discrete(self.embed.graph.num_nodes)
@@ -29,27 +30,34 @@ class CustomEnv(gym.Env):
 
 
     def reset(self):
+        print(self.influence)
         self.influence = 0
-        self.embed = Embed(self.embed.graph)
+        self.num_step = 0
+        self.embed.re_init()
         return self.embed
     
 
     def step(self, action):
         if self.embed.graph.labels[action]==1:
-            return self.embed.cur_embed, -10, True, {}
+            return self.embed, -10, True, {}
 
         #Default Iter set to 1000
         #Calculate reward
-        new_inf =  simulate(self.embed.graph, 1000) 
+        self.embed.graph.labels[action]=1
+        new_inf =  simulate(self.embed.graph, 100) 
         marginal_gain = max(0,new_inf-self.influence)
+        self.influence = new_inf + marginal_gain
 
         #calculate if done
         self.num_step+=1
         done = (self.num_step>=self.budget)
 
         #update embeddings (ovservation)
-        self.embed.graph.labels[action]==1
+        
+        
         self.embed.update()
+
+        #print(action)
 
         return self.embed, marginal_gain, done, {}
     
