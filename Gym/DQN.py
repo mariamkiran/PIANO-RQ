@@ -163,16 +163,18 @@ class DQNAgent:
             env.embed.graph.labels[v] = 1
             budget-=1
         
-        print(simulate(env.embed.graph,100))
+        result = simulate(env.embed.graph,1000)
         env.reset()
+        return result
     
     def random_select(self, env):
         env.embed.update()
         random_numbers = random.sample(range(500), 10)
         for i in random_numbers:
             env.embed.graph.labels[i] = 1
-        print(simulate(env.embed.graph,100))
+        result = simulate(env.embed.graph,1000)
         env.reset()
+        return result
     
 
         
@@ -221,8 +223,10 @@ def train_agent(agent, env, episodes, batch_size):
             state = next_state
             episode_reward += reward
 
+            
         # Log episode performance
         print(f"Episode {episode + 1}/{episodes} - Total Reward: {episode_reward}")
+        print(f"total influenced: {env.influence}")
 
     agent.replay_buffer.clear()
     torch.save({
@@ -260,13 +264,18 @@ def main():
         # Restore shared alphas
         shared_alphas_state_dict = checkpoint['shared_alphas_state_dict']
         for i, alpha in enumerate(agent.shared_alphas):
-            alpha.copy_(shared_alphas_state_dict[f'alpha{i+1}'])
+            alpha.data = shared_alphas_state_dict[f'alpha{i+1}']
     else:
         print("No pre-trained agent found. Creating a new agent...")
     env = CustomEnv(graph, agent.shared_alphas, 10)
 
-    print(agent.random_select(env))
-    train_agent(agent, env, 30, 5)    
+    random_avg = 0.0
+    for i in range(30):
+        random_avg += agent.random_select(env)
+    print(random_avg/30)
+
+    train_agent(agent, env, 0, 5)    
+    print(agent.evaluate(env, 10))
 
 
 if __name__ == "__main__":

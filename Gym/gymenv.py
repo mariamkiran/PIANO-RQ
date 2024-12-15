@@ -30,7 +30,7 @@ class CustomEnv(gym.Env):
 
 
     def reset(self):
-        print(self.influence)
+        
         self.influence = 0
         self.num_step = 0
         self.embed.re_init()
@@ -44,7 +44,7 @@ class CustomEnv(gym.Env):
         #Default Iter set to 1000
         #Calculate reward
         self.embed.graph.labels[action]=1
-        new_inf =  simulate(self.embed.graph, 100) 
+        new_inf =  simulate(self.embed.graph, 1000) 
         marginal_gain = max(0,new_inf-self.influence)
         self.influence = new_inf + marginal_gain
 
