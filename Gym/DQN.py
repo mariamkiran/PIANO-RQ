@@ -10,12 +10,15 @@ from custom_graph import Graph
 from stovec import Embed
 from gymenv import CustomEnv
 from simulator import simulate
+from simulator import celf
 
 #hyperparameters
 REPLAY_CAPACITY = 2000
 GAMMA = 0.99
 LR = 0.001
 EPSILON = 0.1
+
+
 
 class QNet(nn.Module):
     def __init__(self, embed_dim=32):
@@ -71,7 +74,7 @@ class DQNAgent:
             lr=LR
         )
 
-    def select_action(self, env, valid_nodes):
+    def select_action(self, env, valid_nodes, epsilon):
         """
         Args:
             valid_nodes: List of node indices that are not yet in the seed set.
@@ -83,7 +86,8 @@ class DQNAgent:
         current_embeddings = env.embed.cur_embed
         agg_embed = current_embeddings.sum(dim=0)  # Sum of all node embeddings
 
-        if random.random() < EPSILON:
+        
+        if random.random() < epsilon:
             # Exploration: Choose a random valid node
             return random.choice(valid_nodes)
         else:
@@ -167,9 +171,9 @@ class DQNAgent:
         env.reset()
         return result
     
-    def random_select(self, env):
+    def random_select(self, env, nodes, num_nodes):
         env.embed.update()
-        random_numbers = random.sample(range(500), 10)
+        random_numbers = random.sample(range(num_nodes), nodes)
         for i in random_numbers:
             env.embed.graph.labels[i] = 1
         result = simulate(env.embed.graph,1000)
@@ -198,6 +202,8 @@ def train_agent(agent, env, episodes, batch_size):
         done = False
         episode_reward = 0
 
+        epsilon = 0.10
+
         while not done:
             # Get the valid nodes (not yet selected)
             valid_nodes = [i for i, label in enumerate(env.embed.graph.labels) if label == 0]
@@ -208,7 +214,8 @@ def train_agent(agent, env, episodes, batch_size):
             #        valid_nodes.append(i)
 
             # Select an action 
-            action = agent.select_action(env, valid_nodes)
+            action = agent.select_action(env, valid_nodes, epsilon)
+            epsilon *= 0.95
 
             # Apply the action 
             next_state, reward, done, _ = env.step(action)
@@ -234,12 +241,15 @@ def train_agent(agent, env, episodes, batch_size):
         'shared_alphas_state_dict': {f'alpha{i+1}': alpha for i, alpha in enumerate(agent.shared_alphas)}
     }, 'C:\\Users\\17789\\Desktop\\Graph Dataset\\DQN_agent.pth')
 
-def main():
+    
+def DQN_main(num_nodes):
+    
+    
     input_file = 'C:\\Users\\17789\\Desktop\\Graph Dataset\\subgraph1.txt'
     adj_list = {}
 
-    for i in range(501): adj_list[i]= []
-
+    for i in range(num_nodes+1): adj_list[i]= []
+    max_node = 0
     with open(input_file, 'r') as file:
         for line in file:
             u, v, weight = line.strip().split()  # Split into u, v, and weight
@@ -249,9 +259,15 @@ def main():
             if u not in adj_list:
                 adj_list[u] = []
             adj_list[u].append((v, weight))  # Add edge with weight
+            max_node = max(max_node, max(u,v))
 
+    
+    if max_node<100 :
+        return
+    
+    max_node = max_node
     # Create a Graph object with the adjacency list
-    graph = Graph(501, adj_list)
+    graph = Graph(max_node+1, adj_list)
     
 
     agent = DQNAgent()
@@ -269,16 +285,19 @@ def main():
         print("No pre-trained agent found. Creating a new agent...")
     env = CustomEnv(graph, agent.shared_alphas, 10)
 
+   
+    train_agent(agent, env, 30, 10)    
+
+     
     random_avg = 0.0
-    for i in range(30):
-        random_avg += agent.random_select(env)
-    print(random_avg/30)
+    for i in range(20):
+        random_avg += agent.random_select(env, 10,max_node)
 
-    train_agent(agent, env, 0, 5)    
+    print(f'random result: {random_avg/20}')
+    
     print(agent.evaluate(env, 10))
+    print(celf(graph,10))
 
 
-if __name__ == "__main__":
-    main()
 
 

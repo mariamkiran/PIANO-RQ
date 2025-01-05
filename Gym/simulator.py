@@ -1,5 +1,6 @@
 from custom_graph import Graph
 import random
+import heapq
 from collections import deque
 
 def simulate(graph, iter):
@@ -11,20 +12,51 @@ def simulate(graph, iter):
         newly_activated = deque()
         for i in range(len(activated)):
             if(activated[i]!=0):
-                newly_activated.append(i)
+                newly_activated.append((i,0.0))
     
         while newly_activated:
-            node = newly_activated.popleft()
+            node, decay = newly_activated.popleft()
         
             # Try to influence neighbors
             for (neighbor, weight) in graph.adj[node]:
                 if activated[neighbor] != 1:
                     # Attempt to activate the neighbor with probability equal to weight of edge
                     # There are only 1 chance!
-                    if random.random() < weight:
+                    if random.random() < weight/(2**decay):
                         activated[neighbor] = 1
-                        newly_activated.append(neighbor)
+                        newly_activated.append((neighbor, decay+0.5))
 
         total_activated += activated.count(1)
 
     return total_activated/iter
+
+def celf(graph, k):
+
+    def marginal_gain(node):
+        graph.labels[node] = 1
+        influence = simulate(graph, 1000)  
+
+        graph.labels[node] = 0
+        return influence
+    
+    heap = []
+    selected = 0
+
+
+
+    for node in range(graph.num_nodes):
+        gain = marginal_gain(node)
+        heapq.heappush(heap, (-gain, node, 0))  # Store (-gain, node, flag)
+        #print(node)
+   
+    while selected < k:
+        _, node, last_update = heapq.heappop(heap)
+
+        if last_update == selected:
+            graph.labels[node] = 1
+            selected+=1
+        else:
+            gain = marginal_gain(node)
+            heapq.heappush(heap, (-gain, node, selected))
+        #print(selected)
+    return simulate(graph, 1000)
