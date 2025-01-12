@@ -1,5 +1,6 @@
 from custom_graph import Graph
 from DQN import DQNAgent
+from DDPG import DDPGAgent
 from simulator import simulate
 from simulator import celf
 from gymenv import CustomEnv
@@ -27,26 +28,52 @@ def test_main(num_nodes):
     # Create a Graph object with the adjacency list
     graph = Graph(node_count+1, adj_list)
 
-    agent = DQNAgent()
+    DQN_agent = DQNAgent()
 
     if os.path.exists('C:\\Users\\17789\\Desktop\\Graph Dataset\\DQN_agent.pth'):
         print("Loading pre-trained agent...")
         checkpoint = torch.load('C:\\Users\\17789\\Desktop\\Graph Dataset\\DQN_agent.pth')
-        agent.q_network.load_state_dict(checkpoint['q_network_state_dict'])
+        DQN_agent.q_network.load_state_dict(checkpoint['q_network_state_dict'])
     
         # Restore shared alphas
         shared_alphas_state_dict = checkpoint['shared_alphas_state_dict']
-        for i, alpha in enumerate(agent.shared_alphas):
+        for i, alpha in enumerate(DQN_agent.shared_alphas):
             alpha.data = shared_alphas_state_dict[f'alpha{i+1}']
     else:
         print("No pre-trained agent found. Creating a new agent...")
-    env = CustomEnv(graph, agent.shared_alphas, 10)
+
+    DDPG_agent = DDPGAgent()
+
+    if os.path.exists('C:\\Users\\17789\\Desktop\\Graph Dataset\\DDPG_agent.pth'):
+        print("Loading pre-trained agent...")
+        checkpoint = torch.load('C:\\Users\\17789\\Desktop\\Graph Dataset\\DDPG_agent.pth')
+        
+        # Load Q-network (betas and thetas included)
+        DDPG_agent.actor.load_state_dict(checkpoint['actor_state_dict'])
+        DDPG_agent.critic.load_state_dict(checkpoint['critic_state_dict'])
+        
+        # Restore shared alphas
+        shared_alphas_state_dict = checkpoint['shared_alphas_state_dict']
+        for i, alpha in enumerate(DDPG_agent.shared_alphas):
+            alpha.data = shared_alphas_state_dict[f'alpha{i+1}']
+        
+        # Restore epsilon
+        #epsilon = checkpoint.get('epsilon', 0.10)  # Use default if not saved
+    else:
+        print("No pre-trained agent found. Creating a new agent...")
+
+    env = CustomEnv(graph, DQN_agent.shared_alphas, 10)
 
     #print(1)
-    print(f'DQN: {agent.evaluate(env, 10)}')
+    print(f'DQN: {DQN_agent.evaluate(env, 10)}')
+
+    env = CustomEnv(graph, DDPG_agent.shared_alphas, 10)
+
+    print(f'DDPG: {DDPG_agent.evaluate(env, 10)}')
+    
     random_avg = 0.0
     for i in range(30):
-        random_avg += agent.random_select(env,10,8274)
+        random_avg += DQN_agent.random_select(env,10,8274)
     print(f'Random: {random_avg/30}')
     print(f'CELF: {celf(graph,10)}')
 

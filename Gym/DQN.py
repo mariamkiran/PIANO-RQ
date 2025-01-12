@@ -1,4 +1,5 @@
 import torch
+import time
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
@@ -11,6 +12,7 @@ from stovec import Embed
 from gymenv import CustomEnv
 from simulator import simulate
 from simulator import celf
+
 
 #hyperparameters
 REPLAY_CAPACITY = 2000
@@ -150,6 +152,7 @@ class DQNAgent:
         self.replay_buffer.append((state_copy, action, reward, next_state_copy))
 
     def evaluate(self, env, budget):
+        start_time = time.time()
         env.embed.update()
 
         agg_embed = env.embed.cur_embed.sum(dim=0) 
@@ -167,8 +170,15 @@ class DQNAgent:
             env.embed.graph.labels[v] = 1
             budget-=1
         
-        result = simulate(env.embed.graph,1000)
+        result = simulate(env.embed.graph,10000)
+
+        end_time = time.time()
+
+        print(end_time-start_time)
+
         env.reset()
+
+        
         return result
     
     def random_select(self, env, nodes, num_nodes):
@@ -288,7 +298,7 @@ def DQN_main(num_nodes):
    
     train_agent(agent, env, 30, 10)    
 
-     
+    '''
     random_avg = 0.0
     for i in range(20):
         random_avg += agent.random_select(env, 10,max_node)
@@ -297,7 +307,7 @@ def DQN_main(num_nodes):
     
     print(agent.evaluate(env, 10))
     print(celf(graph,10))
-
+    '''
 
 
 

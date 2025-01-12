@@ -1,6 +1,7 @@
 from custom_graph import Graph
 import random
 import heapq
+import time
 from collections import deque
 
 def simulate(graph, iter):
@@ -39,10 +40,10 @@ def celf(graph, k):
         graph.labels[node] = 0
         return influence
     
+    start_time = time.time()
+
     heap = []
     selected = 0
-
-
 
     for node in range(graph.num_nodes):
         gain = marginal_gain(node)
@@ -59,4 +60,8 @@ def celf(graph, k):
             gain = marginal_gain(node)
             heapq.heappush(heap, (-gain, node, selected))
         #print(selected)
-    return simulate(graph, 1000)
+
+    end_time = time.time()
+
+    print(end_time-start_time)
+    return simulate(graph, 10000)
