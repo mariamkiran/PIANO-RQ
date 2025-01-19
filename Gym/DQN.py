@@ -19,7 +19,7 @@ REPLAY_CAPACITY = 2000
 GAMMA = 0.99
 LR = 0.001
 EPSILON = 0.1
-
+#torch.set_default_device('cuda')
 
 
 class QNet(nn.Module):
@@ -137,11 +137,9 @@ class DQNAgent:
             target = reward + GAMMA * max_next_q
 
             # Compute loss for this experience
-            loss += (target - q_value)
+            loss += (target - q_value)**2
 
         #delayed loss update
-        loss = loss ** 2
-        loss /= batch_size
         self.optimizer.zero_grad() 
         loss.backward()  # Backpropagate to update neural network parameters
         self.optimizer.step()  # Update alpha and beta
@@ -212,7 +210,7 @@ def train_agent(agent, env, episodes, batch_size):
         done = False
         episode_reward = 0
 
-        epsilon = 0.10
+        epsilon = 0.20
 
         while not done:
             # Get the valid nodes (not yet selected)
@@ -253,7 +251,7 @@ def train_agent(agent, env, episodes, batch_size):
 
     
 def DQN_main(num_nodes):
-    
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     input_file = 'C:\\Users\\17789\\Desktop\\Graph Dataset\\subgraph1.txt'
     adj_list = {}
@@ -296,7 +294,7 @@ def DQN_main(num_nodes):
     env = CustomEnv(graph, agent.shared_alphas, 10)
 
    
-    train_agent(agent, env, 30, 10)    
+    train_agent(agent, env, 10, 15)    
 
     '''
     random_avg = 0.0

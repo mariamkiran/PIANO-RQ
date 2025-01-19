@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from custom_graph import Graph
 import copy
+#torch.set_default_device('cuda')
 
 class Embed(nn.Module):
     def __init__(self, graph, alphas, embed_dim=32, num_iterations=4):

@@ -1,18 +1,21 @@
 import random
 from DDPG import DDPG_main
 from DQN import DQN_main
-from gensubgraph import bfs_sample
+from gensubgraph2 import bfs_sample
 import time
+from AgentTest import test_main
 
 t = 0
 
-while t < 10: 
+while t < 30: 
     
+    if t%5 == 0 and t!=0:
+         test_main(8274)    
 
-    start_node = random.randint(5000,8000)
-    max_node = random.randint(600,800)
+    start_node = random.randint(1,8200)
+    max_node = random.randint(500,800)
 
-    input_txt = 'C:\\Users\\17789\\Desktop\\Graph Dataset\\wiki-Vote.txt'
+    input_txt = 'C:\\Users\\17789\\Desktop\\Graph Dataset\\weighted_sample.txt'
     output_txt = 'C:\\Users\\17789\\Desktop\\Graph Dataset\\subgraph1.txt'
     bfs_sample(input_txt, output_txt, start_node, max_node)
 
@@ -32,3 +35,6 @@ while t < 10:
          t+=1
     print(f"Runtime1: {runtime1:.2f} seconds")
     print(f"Runtime2: {runtime2:.2f} seconds")
+    
+
+

@@ -20,7 +20,7 @@ LR_ALPHAS = 0.0005
 LR_CRITIC = 0.001  # Learning rate for critic
 LR_ACTOR = 0.0001  # Learning rate for actor  # MODIFIED
 EPSILON = 0.1
-
+#torch.set_default_device('cuda')
 
 class QNet(nn.Module):
     def __init__(self, embed_dim=32):
@@ -251,6 +251,8 @@ def train_agent(agent, env, episodes, batch_size, epsilon):
 
     
 def DDPG_main(num_nodes):
+
+
     input_file = 'C:\\Users\\17789\\Desktop\\Graph Dataset\\subgraph1.txt'
     adj_list = {}
 
@@ -274,7 +276,7 @@ def DDPG_main(num_nodes):
     # Create a Graph object with the adjacency list
     graph = Graph(max_node + 1, adj_list)
     agent = DDPGAgent()
-    epsilon = 0.10  # Default exploration rate
+    epsilon = 0.20  # Default exploration rate
 
     # Load pre-trained model if it exists
     if os.path.exists('C:\\Users\\17789\\Desktop\\Graph Dataset\\DDPG_agent.pth'):
@@ -299,7 +301,7 @@ def DDPG_main(num_nodes):
     env = CustomEnv(graph, agent.shared_alphas, 10)
 
     # Train the agent
-    train_agent(agent, env, 30, 10, epsilon)
+    train_agent(agent, env, 10, 16, epsilon)
 
     # Evaluate random selection strategy for comparison
 

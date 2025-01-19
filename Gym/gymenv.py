@@ -5,6 +5,7 @@ import torch
 from custom_graph import Graph
 from stovec import Embed
 from simulator import simulate
+#torch.set_default_device('cuda')
 
 class CustomEnv(gym.Env):
 
