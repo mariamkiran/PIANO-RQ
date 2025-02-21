@@ -106,63 +106,54 @@ class DDPGAgent:  # MODIFIED
             agg_embed = state.cur_embed.sum(dim=0)
             node_embed = state.cur_embed[action]
 
-            # Critic Loss (TD error)
-            q_value = self.critic(node_embed.unsqueeze(0), agg_embed.unsqueeze(0), role='critic')
+            # --- Critic Loss (TD error) ---
+            q_value = self.critic(node_embed.unsqueeze(0), agg_embed.unsqueeze(0), role='critic')  # Q(s,a)
+
             next_agg_embed = next_state.cur_embed.sum(dim=0)
+            next_q_values = []
+            valid_nodes = []
 
-            next_q = []
+            # Calculate Q-values for the next state
             for v in range(state.graph.num_nodes):
-                if next_state.graph.labels[v] == 1:  # Skip invalid nodes
-                    next_q.append((0, v))
-                else:
-                    q_val = self.critic(next_state.cur_embed[v].unsqueeze(0), next_agg_embed.unsqueeze(0), role='critic').item()
-                    next_q.append((q_val, v))
+                if next_state.graph.labels[v] == 0:  # Valid node
+                    q_val = self.critic(next_state.cur_embed[v].unsqueeze(0), next_agg_embed.unsqueeze(0), role='critic')
+                    next_q_values.append(q_val)
+                    valid_nodes.append(v)
 
-            max_next_q = max(next_q, key=lambda x: x[0])  # Get (max Q-value, best node)
+            max_next_q = torch.max(torch.stack(next_q_values)) if next_q_values else torch.tensor(0.0, device=self.actor.beta1.device)
+            target = reward + gamma * max_next_q  # TD target
+            critic_loss_value += F.mse_loss(q_value, target)  # Critic loss
 
-            # Compute TD target
-            target = reward + gamma * max_next_q[0]
-            critic_loss_value += (q_value-target)**2
+            # --- Actor Loss (Policy Gradient with Advantage) ---
+            # Calculate action probabilities for all valid nodes
+            action_logits = []
+            for v in valid_nodes:
+                logit = self.actor(next_state.cur_embed[v].unsqueeze(0), next_agg_embed.unsqueeze(0), role='actor')
+                action_logits.append(logit.squeeze())
 
-            # Actor Loss
-            act_prob = []
-            valid_mask = []
+            action_logits = torch.stack(action_logits)
+            action_probs = F.softmax(action_logits, dim=0)  # Probability distribution
+            log_probs = F.log_softmax(action_logits, dim=0)  # Log probabilities for stability
 
-            for v in range(state.graph.num_nodes):
-                if next_state.graph.labels[v] == 1:  # Skip invalid nodes
-                    act_prob.append(torch.tensor([0.0], device=self.actor.beta1.device))  # Placeholder for invalid nodes
-                    valid_mask.append(0)  # Mark as invalid
-                else:
-                    prob = self.actor(next_state.cur_embed[v].unsqueeze(0), next_agg_embed.unsqueeze(0), role='actor')
-                    act_prob.append(prob.squeeze(1))  # Squeeze to ensure consistent shape
-                    valid_mask.append(1)  # Mark as valid
+            # Advantage = Q(s,a) - baseline (mean of next Q-values)
+            baseline = torch.mean(torch.stack(next_q_values)) if next_q_values else torch.tensor(0.0, device=self.actor.beta1.device)
+            advantage = (target - baseline).detach()  # Detach to avoid double gradient flow
 
-            # Convert act_prob to a tensor
-            act_prob = torch.cat(act_prob).to(self.actor.beta1.device)
-            valid_mask = torch.tensor(valid_mask, dtype=torch.float32, device=self.actor.beta1.device)
+            # Log probability of the taken action
+            if action in valid_nodes:
+                action_index = valid_nodes.index(action)
+                actor_loss_value += -log_probs[action_index] * advantage  # Policy gradient loss
 
-            # Apply valid mask to act_prob
-            act_prob = act_prob * valid_mask
-
-            # Normalize probabilities for valid nodes
-            act_prob = F.softmax(act_prob, dim=0)
-
-            # Ground truth target for actor
-            target = torch.zeros_like(act_prob, device=self.actor.beta1.device)
-            target[max_next_q[1]] = 1  # Set the target for the best node
-
-            # Compute actor loss
-            actor_loss_value += F.cross_entropy(act_prob.unsqueeze(0), target.unsqueeze(0))
-
-        # Update Critic
+        # --- Update Critic ---
         self.optimizer_critic.zero_grad()
         critic_loss_value.backward()
         self.optimizer_critic.step()
 
-        # Update Actor
+        # --- Update Actor ---
         self.optimizer_actor.zero_grad()
         actor_loss_value.backward()
         self.optimizer_actor.step()
+
 
     def add_experience(self, state, action, reward, next_state):
         state_copy = state.copy_emb()

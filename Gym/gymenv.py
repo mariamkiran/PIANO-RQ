@@ -47,7 +47,7 @@ class CustomEnv(gym.Env):
         self.embed.graph.labels[action]=1
         new_inf =  simulate(self.embed.graph, 1000) 
         marginal_gain = max(0,new_inf-self.influence)
-        self.influence = new_inf + marginal_gain
+        self.influence = new_inf
 
         #calculate if done
         self.num_step+=1

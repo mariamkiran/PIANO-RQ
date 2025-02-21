@@ -172,7 +172,7 @@ class DQNAgent:
 
         end_time = time.time()
 
-        print(end_time-start_time)
+        print(f"DQN: {end_time - start_time:.2f} seconds")
 
         env.reset()
 
@@ -247,13 +247,13 @@ def train_agent(agent, env, episodes, batch_size):
     torch.save({
         'q_network_state_dict': agent.q_network.state_dict(),
         'shared_alphas_state_dict': {f'alpha{i+1}': alpha for i, alpha in enumerate(agent.shared_alphas)}
-    }, 'C:\\Users\\17789\\Desktop\\Graph Dataset\\DQN_agent.pth')
+    }, 'C:\\Users\\17789\\Desktop\\New Graph Dataset\\DQN_agent(p2p1.1).pth')
 
     
 def DQN_main(num_nodes):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
-    input_file = 'C:\\Users\\17789\\Desktop\\Graph Dataset\\subgraph1.txt'
+    input_file = 'C:\\Users\\17789\\Desktop\\New Graph Dataset\\subgraph1.txt'
     adj_list = {}
 
     for i in range(num_nodes+1): adj_list[i]= []
@@ -280,9 +280,9 @@ def DQN_main(num_nodes):
 
     agent = DQNAgent()
 
-    if os.path.exists('C:\\Users\\17789\\Desktop\\Graph Dataset\\DQN_agent.pth'):
+    if os.path.exists('C:\\Users\\17789\\Desktop\\New Graph Dataset\\DQN_agent(p2p1.1).pth'):
         print("Loading pre-trained agent...")
-        checkpoint = torch.load('C:\\Users\\17789\\Desktop\\Graph Dataset\\DQN_agent.pth')
+        checkpoint = torch.load('C:\\Users\\17789\\Desktop\\New Graph Dataset\\DQN_agent(p2p1.1).pth')
         agent.q_network.load_state_dict(checkpoint['q_network_state_dict'])
     
         # Restore shared alphas
@@ -291,10 +291,10 @@ def DQN_main(num_nodes):
             alpha.data = shared_alphas_state_dict[f'alpha{i+1}']
     else:
         print("No pre-trained agent found. Creating a new agent...")
-    env = CustomEnv(graph, agent.shared_alphas, 10)
+    env = CustomEnv(graph, agent.shared_alphas, 20)
 
    
-    train_agent(agent, env, 10, 15)    
+    train_agent(agent, env, 15, 16)    
 
     '''
     random_avg = 0.0
