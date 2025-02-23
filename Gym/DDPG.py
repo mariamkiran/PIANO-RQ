@@ -94,72 +94,69 @@ class DDPGAgent:  # MODIFIED
             action_probs = torch.cat(action_probs).squeeze()
             return valid_nodes[action_probs.argmax().item()]
     
-    def train(self, batch_size, gamma=0.99):  # MODIFIED
+    def train(self, batch_size, gamma=0.99):
         if len(self.replay_buffer) < batch_size:
             return
 
         batch = random.sample(self.replay_buffer, batch_size)
-        critic_loss_value = 0
-        actor_loss_value = 0
+        # Initialize losses as tensors
+        critic_loss_value = torch.tensor(0.0, device=next(self.critic.parameters()).device, dtype=torch.float32)
+        actor_loss_value = torch.tensor(0.0, device=next(self.actor.parameters()).device, dtype=torch.float32)
 
         for state, action, reward, next_state in batch:
-            agg_embed = state.cur_embed.sum(dim=0)
-            node_embed = state.cur_embed[action]
+            # ----- Critic Update -----
+            # Current state: ensure shapes [1, embed_dim]
+            agg_embed = state.cur_embed.sum(dim=0, keepdim=True)       # [1, embed_dim]
+            node_embed = state.cur_embed[action].unsqueeze(0)            # [1, embed_dim]
+            q_value = self.critic(node_embed, agg_embed, role='critic')    # [1, 1]
 
-            # Critic Loss (TD error)
-            q_value = self.critic(node_embed.unsqueeze(0), agg_embed.unsqueeze(0), role='critic')
-            next_agg_embed = next_state.cur_embed.sum(dim=0)
+            # Next state: compute aggregate embedding
+            next_agg_embed = next_state.cur_embed.sum(dim=0, keepdim=True) # [1, embed_dim]
 
+            # Compute Q-values for all nodes in next state (using loop to mimic original behavior)
             next_q = []
             for v in range(state.graph.num_nodes):
                 if next_state.graph.labels[v] == 1:  # Skip invalid nodes
-                    next_q.append((0, v))
+                    next_q.append((0.0, v))
                 else:
-                    q_val = self.critic(next_state.cur_embed[v].unsqueeze(0), next_agg_embed.unsqueeze(0), role='critic').item()
+                    # Use unsqueeze(0) so each call sees [1, embed_dim]
+                    q_val = self.critic(next_state.cur_embed[v].unsqueeze(0), next_agg_embed, role='critic').item()
                     next_q.append((q_val, v))
-
-            max_next_q = max(next_q, key=lambda x: x[0])  # Get (max Q-value, best node)
-
-            # Compute TD target
+            # Get the best next action's Q-value (and its node index)
+            max_next_q = max(next_q, key=lambda x: x[0])
+            # Compute TD target (target is a scalar, so gradients do not flow through it)
             target = reward + gamma * max_next_q[0]
-            critic_loss_value += (q_value-target)**2
+            # Compute critic loss; note: q_value is [1,1], so target is implicitly converted
+            critic_loss_value = critic_loss_value + (q_value - target) ** 2
 
-            # Actor Loss
-            act_prob = []
-            valid_mask = []
+            # ----- Actor Update -----
+            # For actor update, we want to update the policy so that it favors the best action,
+            # as determined by the critic update.
+            # We use next_state's embeddings (like in your original code).
+            # Build the valid set from next_state.
+            valid_current_nodes = [v for v in range(state.graph.num_nodes) if next_state.graph.labels[v] == 0]
+            if valid_current_nodes:
+                valid_embeds = next_state.cur_embed[valid_current_nodes]  # [num_valid, embed_dim]
+                # Use the same aggregate from next_state
+                actor_agg_embed = next_agg_embed.repeat(len(valid_current_nodes), 1)  # [num_valid, embed_dim]
+                # Compute raw logits from the actor (do not apply softmax)
+                logits = self.actor(valid_embeds, actor_agg_embed, role='actor').squeeze()  # [num_valid]
+                # Determine the target action: find the index in valid_current_nodes that equals max_next_q[1]
+                try:
+                    target_index = valid_current_nodes.index(max_next_q[1])
+                except ValueError:
+                    # If the best node is not in the valid set (should not happen), skip actor update.
+                    continue
+                # F.cross_entropy expects logits (not softmaxed) and a target label as an integer.
+                actor_loss = F.cross_entropy(logits.unsqueeze(0), torch.tensor([target_index], device=logits.device))
+                actor_loss_value = actor_loss_value + actor_loss
 
-            for v in range(state.graph.num_nodes):
-                if next_state.graph.labels[v] == 1:  # Skip invalid nodes
-                    act_prob.append(torch.tensor([0.0], device=self.actor.beta1.device))  # Placeholder for invalid nodes
-                    valid_mask.append(0)  # Mark as invalid
-                else:
-                    prob = self.actor(next_state.cur_embed[v].unsqueeze(0), next_agg_embed.unsqueeze(0), role='actor')
-                    act_prob.append(prob.squeeze(1))  # Squeeze to ensure consistent shape
-                    valid_mask.append(1)  # Mark as valid
-
-            # Convert act_prob to a tensor
-            act_prob = torch.cat(act_prob).to(self.actor.beta1.device)
-            valid_mask = torch.tensor(valid_mask, dtype=torch.float32, device=self.actor.beta1.device)
-
-            # Apply valid mask to act_prob
-            act_prob = act_prob * valid_mask
-
-            # Normalize probabilities for valid nodes
-            act_prob = F.softmax(act_prob, dim=0)
-
-            # Ground truth target for actor
-            target = torch.zeros_like(act_prob, device=self.actor.beta1.device)
-            target[max_next_q[1]] = 1  # Set the target for the best node
-
-            # Compute actor loss
-            actor_loss_value += F.cross_entropy(act_prob.unsqueeze(0), target.unsqueeze(0))
-
-        # Update Critic
+        # Update Critic network
         self.optimizer_critic.zero_grad()
         critic_loss_value.backward()
         self.optimizer_critic.step()
 
-        # Update Actor
+        # Update Actor network
         self.optimizer_actor.zero_grad()
         actor_loss_value.backward()
         self.optimizer_actor.step()

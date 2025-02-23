@@ -36,7 +36,7 @@ def celf(graph, k):
 
     def marginal_gain(node):
         graph.labels[node] = 1
-        influence = simulate(graph, 1000)  
+        influence = simulate(graph, 100)  
 
         graph.labels[node] = 0
         return influence

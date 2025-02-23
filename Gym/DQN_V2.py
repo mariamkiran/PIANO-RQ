@@ -83,66 +83,71 @@ class DQNAgent:
         Returns:
             The index of the selected node.
         """
-
         # Compute the current embeddings
         current_embeddings = env.embed.cur_embed
         agg_embed = current_embeddings.sum(dim=0)  # Sum of all node embeddings
 
-        
         if random.random() < epsilon:
             # Exploration: Choose a random valid node
             return random.choice(valid_nodes)
         else:
-            # Exploitation: Choose the node with the highest Q-value
-            q_values = []
-            for v in valid_nodes:
-                node_embed = current_embeddings[v]  # Embedding for node v
-                q_values.append(
-                    self.q_network(node_embed.unsqueeze(0), agg_embed.unsqueeze(0))
-                )
-            q_values = torch.cat(q_values).squeeze()
-            return valid_nodes[q_values.argmax().item()] #basically return which node has largest Q value
+            # Exploitation: Vectorized computation of Q-values
+            # Gather embeddings for all valid nodes in one go.
+            valid_node_embeds = current_embeddings[valid_nodes]  # shape: (num_valid, embed_dim)
+            
+            # Repeat the aggregated embedding to match the number of valid nodes.
+            repeated_agg_embed = agg_embed.unsqueeze(0).repeat(valid_node_embeds.size(0), -1)
+            
+            # Compute the Q-values for all valid nodes simultaneously.
+            q_values = self.q_network(valid_node_embeds, repeated_agg_embed)  # expected shape: (num_valid, 1) or (num_valid,)
+            q_values = q_values.squeeze()
+            
+            # Select the valid node with the highest Q-value.
+            best_index = q_values.argmax().item()
+            return valid_nodes[best_index]
 
-    def train(self, batch_size):
-        """
-        Trains the agent using experiences from the replay buffer.
-
-        Args:
-            batch_size: Number of samples to use for training.
-        """
+    def train(self, batch_size, gamma=GAMMA):
         if len(self.replay_buffer) < batch_size:
             return
 
         batch = random.sample(self.replay_buffer, batch_size)
-        loss = 0
+        total_loss = 0.0
 
         for state, action, reward, next_state in batch:
+            # --- Current state ---
+            # Use unsqueeze(0) so that each input has shape [1, embed_dim]
+            agg_embed = state.cur_embed.sum(dim=0, keepdim=True)       # [1, embed_dim]
+            node_embed = state.cur_embed[action].unsqueeze(0)            # [1, embed_dim]
+            q_value = self.q_network(node_embed, agg_embed)              # [1, 1]
 
-            agg_embed = state.cur_embed.sum(dim=0)  # Aggregate embedding for state
-            node_embed = state.cur_embed[action]  # Embedding of the selected action node
+            # --- Next state ---
+            next_agg_embed = next_state.cur_embed.sum(dim=0, keepdim=True)  # [1, embed_dim]
+            # Build valid indices exactly as in the original (if label != 1)
+            valid_indices = [v for v in range(state.graph.num_nodes) if next_state.graph.labels[v] != 1]
+            if valid_indices:
+                # Vectorize over valid nodes: each embedding is [embed_dim]
+                valid_node_embeds = next_state.cur_embed[valid_indices]     # [num_valid, embed_dim]
+                # Repeat the aggregated embedding so each valid node gets its own copy.
+                repeated_next_agg = next_agg_embed.expand(valid_node_embeds.size(0), -1)  # [num_valid, embed_dim]
+                # Forward pass for all valid next actions
+                next_q_values = self.q_network(valid_node_embeds, repeated_next_agg)  # [num_valid, 1]
+                # Squeeze so that we have shape [num_valid]
+                next_q_values = next_q_values.squeeze(1)
+                # Detach the next-Q values to ensure target does not propagate gradients.
+                max_next_q = next_q_values.detach().max()
+            else:
+                max_next_q = torch.tensor(0.0, device=q_value.device)
 
-            # Compute Q(s, a) for the current state-action pair
-            q_value = self.q_network(node_embed.unsqueeze(0), agg_embed.unsqueeze(0))
+            # Compute target as a scalar
+            target = reward + gamma * max_next_q
 
-            # Compute embeddings for the next state
+            # Compute squared error loss; q_value is [1,1] so subtract target and square.
+            total_loss += (target - q_value)**2
 
-            next_agg_embed = next_state.cur_embed.sum(dim=0)
+        self.optimizer.zero_grad()
+        total_loss.backward()
+        self.optimizer.step()
 
-            # Compute the target Q-value using max_a' Q(s', a')
-            max_next_q = max(
-                self.q_network(next_state.cur_embed[v].unsqueeze(0), next_agg_embed.unsqueeze(0))
-                for v in range(state.graph.num_nodes) if next_state.graph.labels[v] != 1
-            )
-
-            target = reward + GAMMA * max_next_q
-
-            # Compute loss for this experience
-            loss += (target - q_value)**2
-
-        #delayed loss update
-        self.optimizer.zero_grad() 
-        loss.backward()  # Backpropagate to update neural network parameters
-        self.optimizer.step()  # Update alpha and beta
 
     def add_experience(self, state, action, reward, next_state):
         state_copy = state.copy_emb()
@@ -237,7 +242,6 @@ def train_agent(agent, env, episodes, batch_size):
 
             episode_reward += reward
 
-
             
         # Log episode performance
         print(f"Episode {episode + 1}/{episodes} - Total Reward: {episode_reward}")
@@ -247,7 +251,7 @@ def train_agent(agent, env, episodes, batch_size):
     torch.save({
         'q_network_state_dict': agent.q_network.state_dict(),
         'shared_alphas_state_dict': {f'alpha{i+1}': alpha for i, alpha in enumerate(agent.shared_alphas)}
-    }, 'C:\\Users\\17789\\Desktop\\New Graph Dataset\\DQN_agent(p2p1_c).pth')
+    }, 'C:\\Users\\17789\\Desktop\\New Graph Dataset\\DQN_agent(p2p1_c4).pth')
 
     
 def DQN_main(num_nodes):
@@ -280,9 +284,9 @@ def DQN_main(num_nodes):
 
     agent = DQNAgent()
 
-    if os.path.exists('C:\\Users\\17789\\Desktop\\New Graph Dataset\\DQN_agent(p2p1_c).pth'):
+    if os.path.exists('C:\\Users\\17789\\Desktop\\New Graph Dataset\\DQN_agent(p2p1_c4).pth'):
         print("Loading pre-trained agent...")
-        checkpoint = torch.load('C:\\Users\\17789\\Desktop\\New Graph Dataset\\DQN_agent(p2p1_c).pth')
+        checkpoint = torch.load('C:\\Users\\17789\\Desktop\\New Graph Dataset\\DQN_agent(p2p1_c4).pth')
         agent.q_network.load_state_dict(checkpoint['q_network_state_dict'])
     
         # Restore shared alphas
@@ -306,5 +310,6 @@ def DQN_main(num_nodes):
     print(agent.evaluate(env, 10))
     print(celf(graph,10))
     '''
+
 
 

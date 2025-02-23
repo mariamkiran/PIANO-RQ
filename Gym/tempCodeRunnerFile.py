@@ -1,1 +1,1 @@
-6300
+      max_node = random.randint(300,400)

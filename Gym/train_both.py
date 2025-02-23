@@ -1,11 +1,11 @@
 import random
-from DDPG import DDPG_main
-from DQN import DQN_main
+from DDPG_V3 import DDPG_main
+from DQN_V2 import DQN_main
 from gensubgraph2 import bfs_sample
 import time
 
 t = 0
-while t < 20: 
+while t < 10: 
 
       
       start_node = random.randint(1,6331)
@@ -20,7 +20,7 @@ while t < 20:
       DDPG_main(max_node)
       end_time1 = time.time()
 
-      DQN_main(max_node)
+      #DQN_main(max_node)
       end_time2 = time.time()
 
 
