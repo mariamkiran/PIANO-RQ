@@ -272,7 +272,7 @@ def train_agent(agent, env, episodes, batch_size, epsilon):
         'actor_state_dict': agent.actor.state_dict(),  # Save actor network
         'critic_state_dict': agent.critic.state_dict(),  # Save critic network
         'shared_alphas_state_dict': {f'alpha{i+1}': alpha for i, alpha in enumerate(agent.shared_alphas)},
-    }, 'C:\\Users\\17789\\Desktop\\New Graph Dataset\\DDPG_agent(p2p1.2).pth')
+    }, 'C:\\Users\\17789\\Desktop\\New Graph Dataset\\DDPG_agent(p2p1.z).pth')
 
     
 def DDPG_main(num_nodes):

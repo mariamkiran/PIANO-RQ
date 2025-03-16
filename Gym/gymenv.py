@@ -27,8 +27,12 @@ class CustomEnv(gym.Env):
         self.action_space = spaces.Discrete(self.embed.graph.num_nodes)
 
         #observation is the embeddings
-        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(64,), dtype=np.float32)
-
+        self.observation_space = spaces.Box(
+            low=-np.inf, 
+            high=np.inf, 
+            shape=(self.embed.graph.num_nodes, 64), 
+            dtype=np.float32
+        )
 
     def reset(self):
         

@@ -23,7 +23,7 @@ EPSILON = 0.1
 
 
 class QNet(nn.Module):
-    def __init__(self, embed_dim=32):
+    def __init__(self, embed_dim=64):
         super(QNet, self).__init__()
         self.embed_dim = embed_dim
 
@@ -50,7 +50,7 @@ class QNet(nn.Module):
 
 class DQNAgent:
 
-    def __init__(self, embed_dim=32):
+    def __init__(self, embed_dim=64):
         """
         Initializes the DQN agent.
         Args:
@@ -96,7 +96,7 @@ class DQNAgent:
             valid_node_embeds = current_embeddings[valid_nodes]  # shape: (num_valid, embed_dim)
             
             # Repeat the aggregated embedding to match the number of valid nodes.
-            repeated_agg_embed = agg_embed.unsqueeze(0).repeat(valid_node_embeds.size(0), -1)
+            repeated_agg_embed = agg_embed.unsqueeze(0).expand(valid_node_embeds.size(0), -1)
             
             # Compute the Q-values for all valid nodes simultaneously.
             q_values = self.q_network(valid_node_embeds, repeated_agg_embed)  # expected shape: (num_valid, 1) or (num_valid,)
@@ -168,6 +168,7 @@ class DQNAgent:
         q_list.sort(reverse=True)
 
         for (q,v) in q_list:
+            print(q)
             if budget<=0:
                 break
             env.embed.graph.labels[v] = 1
@@ -251,7 +252,7 @@ def train_agent(agent, env, episodes, batch_size):
     torch.save({
         'q_network_state_dict': agent.q_network.state_dict(),
         'shared_alphas_state_dict': {f'alpha{i+1}': alpha for i, alpha in enumerate(agent.shared_alphas)}
-    }, 'C:\\Users\\17789\\Desktop\\New Graph Dataset\\DQN_agent(p2p1_c4).pth')
+    }, 'C:\\Users\\17789\\Desktop\\New Graph Dataset\\DQN_agent(p2p2_4c3).pth')
 
     
 def DQN_main(num_nodes):
@@ -284,9 +285,9 @@ def DQN_main(num_nodes):
 
     agent = DQNAgent()
 
-    if os.path.exists('C:\\Users\\17789\\Desktop\\New Graph Dataset\\DQN_agent(p2p1_c4).pth'):
+    if os.path.exists('C:\\Users\\17789\\Desktop\\New Graph Dataset\\DQN_agent(p2p2_4c3).pth'):
         print("Loading pre-trained agent...")
-        checkpoint = torch.load('C:\\Users\\17789\\Desktop\\New Graph Dataset\\DQN_agent(p2p1_c4).pth')
+        checkpoint = torch.load('C:\\Users\\17789\\Desktop\\New Graph Dataset\\DQN_agent(p2p2_4c3).pth')
         agent.q_network.load_state_dict(checkpoint['q_network_state_dict'])
     
         # Restore shared alphas
@@ -298,7 +299,7 @@ def DQN_main(num_nodes):
     env = CustomEnv(graph, agent.shared_alphas, 10)
 
    
-    train_agent(agent, env, 15, 16)    
+    train_agent(agent, env, 10, 16)    
 
     '''
     random_avg = 0.0
