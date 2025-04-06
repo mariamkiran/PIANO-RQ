@@ -12,7 +12,7 @@ from stovec import Embed
 from gymenv import CustomEnv
 from simulator import simulate
 from simulator import celf
-
+import torch.nn.utils as nn_utils
 
 #hyperparameters
 REPLAY_CAPACITY = 2000
@@ -34,6 +34,8 @@ class QNet(nn.Module):
 
         # Final linear transformation to produce scalar Q value
         self.fc = nn.Linear(embed_dim * 2, 1)
+        nn.init.xavier_uniform_(self.fc.weight)  # Xavier initialization
+        self.fc = nn_utils.weight_norm(self.fc)  # Apply weight normalization
 
     def forward(self, node_embed, agg_embed):
         
@@ -146,6 +148,7 @@ class DQNAgent:
 
         self.optimizer.zero_grad()
         total_loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.q_network.parameters(), max_norm=10)
         self.optimizer.step()
 
 
@@ -252,7 +255,7 @@ def train_agent(agent, env, episodes, batch_size):
     torch.save({
         'q_network_state_dict': agent.q_network.state_dict(),
         'shared_alphas_state_dict': {f'alpha{i+1}': alpha for i, alpha in enumerate(agent.shared_alphas)}
-    }, 'C:\\Users\\17789\\Desktop\\New Graph Dataset\\DQN_agent(p2p2_4c3).pth')
+    }, 'C:\\Users\\17789\\Desktop\\New Graph Dataset\\DQN_agent(p2p1_4c4).pth')
 
     
 def DQN_main(num_nodes):
@@ -285,9 +288,9 @@ def DQN_main(num_nodes):
 
     agent = DQNAgent()
 
-    if os.path.exists('C:\\Users\\17789\\Desktop\\New Graph Dataset\\DQN_agent(p2p2_4c3).pth'):
+    if os.path.exists('C:\\Users\\17789\\Desktop\\New Graph Dataset\\DQN_agent(p2p1_4c4).pth'):
         print("Loading pre-trained agent...")
-        checkpoint = torch.load('C:\\Users\\17789\\Desktop\\New Graph Dataset\\DQN_agent(p2p2_4c3).pth')
+        checkpoint = torch.load('C:\\Users\\17789\\Desktop\\New Graph Dataset\\DQN_agent(p2p1_4c4).pth')
         agent.q_network.load_state_dict(checkpoint['q_network_state_dict'])
     
         # Restore shared alphas
