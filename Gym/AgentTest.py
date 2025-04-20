@@ -1,6 +1,6 @@
 from custom_graph import Graph
 from DQN_V2 import DQNAgent
-from DDPG_V4 import DDPGAgent
+from DDPG_V3 import DDPGAgent
 from simulator import simulate
 from simulator import celf
 from gymenv import CustomEnv
@@ -31,9 +31,9 @@ def test_main(num_nodes):
     
     DQN_agent = DQNAgent()
 
-    if os.path.exists('C:\\Users\\17789\\Desktop\\New Graph Dataset\\DQN_agent(p2p1_4c3).pth'):
+    if os.path.exists('C:\\Users\\17789\\Desktop\\New Graph Dataset\\DQN_agent(p2p1_3c1).pth'):
         print("Loading pre-trained agent...")
-        checkpoint = torch.load('C:\\Users\\17789\\Desktop\\New Graph Dataset\\DQN_agent(p2p1_4c4).pth')
+        checkpoint = torch.load('C:\\Users\\17789\\Desktop\\New Graph Dataset\\DQN_agent(p2p1_3c1).pth')
         DQN_agent.q_network.load_state_dict(checkpoint['q_network_state_dict'])
     
         # Restore shared alphas
@@ -45,9 +45,9 @@ def test_main(num_nodes):
 
     DDPG_agent = DDPGAgent()
 
-    if os.path.exists('C:\\Users\\17789\\Desktop\\New Graph Dataset\\DDPG_agent(p2p1_4c3).pth'):
+    if os.path.exists('C:\\Users\\17789\\Desktop\\New Graph Dataset\\DDPG_agent(p2p1_3c1).pth'):
         print("Loading pre-trained agent...")
-        checkpoint = torch.load('C:\\Users\\17789\\Desktop\\New Graph Dataset\\DDPG_agent(p2p1_4c4).pth')
+        checkpoint = torch.load('C:\\Users\\17789\\Desktop\\New Graph Dataset\\DDPG_agent(p2p1_3c1).pth')
         
         # Load Q-network (betas and thetas included)
         DDPG_agent.actor.load_state_dict(checkpoint['actor_state_dict'])

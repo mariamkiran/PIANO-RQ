@@ -1,11 +1,11 @@
 import random
-from DDPG_V4 import DDPG_main
+from DDPG_V3 import DDPG_main
 from DQN_V2 import DQN_main
 from gensubgraph2 import bfs_sample
 import time
 
 t = 0
-while t < 15 : 
+while t < 12 : 
 
       
       start_node = random.randint(1,6300)
