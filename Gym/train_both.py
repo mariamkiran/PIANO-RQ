@@ -5,7 +5,7 @@ from gensubgraph2 import bfs_sample
 import time
 
 t = 0
-while t < 12 : 
+while t < 10 : 
 
       
       start_node = random.randint(1,6300)

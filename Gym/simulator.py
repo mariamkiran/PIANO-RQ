@@ -23,7 +23,7 @@ def simulate(graph, iter):
                 if activated[neighbor] != 1:
                     # Attempt to activate the neighbor with probability equal to weight of edge
                     # There are only 1 chance!
-                    if max(0.05,random.random()) < weight/(1):
+                    if max(0.05,random.random()) < weight:
                         
                         activated[neighbor] = 1
                         newly_activated.append((neighbor, decay+0.5))

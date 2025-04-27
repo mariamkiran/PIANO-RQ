@@ -14,140 +14,110 @@ from simulator import simulate
 from simulator import celf
 import torch.nn.utils as nn_utils
 
-#hyperparameters
+# hyperparameters
 REPLAY_CAPACITY = 2000
-GAMMA = 0.99
-LR = 0.001
-EPSILON = 0.1
-#torch.set_default_device('cuda')
+GAMMA           = 0.99
+LR              = 1e-5
+EPSILON         = 0.1
+
+# clamp range
+CLAMP_LOW  = -1.0
+CLAMP_HIGH =  1.0
 
 
 class QNet(nn.Module):
     def __init__(self, embed_dim=64):
-        super(QNet, self).__init__()
+        super().__init__()
         self.embed_dim = embed_dim
 
-        # Trainable parameters beta_1, beta_2, beta_3
-        self.beta1 = nn.Parameter(torch.rand(embed_dim, 1))  # Shape: [embed_dim, 1]
-        self.beta2 = nn.Parameter(torch.rand(1))            # Scalar
-        self.beta3 = nn.Parameter(torch.rand(1))            # Scalar
+        # Trainable parameters
+        self.beta1 = nn.Parameter(torch.rand(embed_dim, 1))
+        self.beta2 = nn.Parameter(torch.rand(1))
+        self.beta3 = nn.Parameter(torch.rand(1))
 
-        # Final linear transformation to produce scalar Q value
         self.fc = nn.Linear(embed_dim * 2, 1)
-        nn.init.xavier_uniform_(self.fc.weight)  # Xavier initialization
-        self.fc = nn_utils.weight_norm(self.fc)  # Apply weight normalization
+        
+        self.fc = nn_utils.weight_norm(self.fc)
+        nn.init.xavier_normal_(self.fc.weight_v)
 
     def forward(self, node_embed, agg_embed):
-        
-        scaled_aggregate = self.beta2 * agg_embed
+        scaled_agg  = self.beta2 * agg_embed
         scaled_node = self.beta3 * node_embed
+        combined    = torch.cat((scaled_agg, scaled_node), dim=1)
+        return self.fc(F.relu(combined))
 
-        # Concatenate scaled embeddings
-        combined = torch.cat((scaled_aggregate, scaled_node), dim=1)  # Shape: [1, 2 * embed_dim]
-
-        # Apply ReLU and final transformation
-        q_value = self.fc(F.relu(combined))  # Shape: [1, 1]
-        return q_value
 
 
 class DQNAgent:
-
     def __init__(self, embed_dim=64):
-        """
-        Initializes the DQN agent.
-        Args:
-            embed: The embeddings_
-            graph: The graph object containing adjacency and labels.
-            embed_dim: Dimensionality of node embeddings.
-        """
         self.replay_buffer = deque(maxlen=REPLAY_CAPACITY)
-        self.embed_dim = embed_dim
+        self.embed_dim     = embed_dim
+
         
-        # OPTIMIZER: trains both alphas and betas
-        self.q_network = QNet(embed_dim)
-        
+
+        # shared alphas (for your graph‐embedding)
         self.alpha1 = nn.Parameter(torch.rand(1))
         self.alpha2 = nn.Parameter(torch.rand(1))
         self.alpha3 = nn.Parameter(torch.rand(1))
         self.alpha4 = nn.Parameter(torch.rand(1))
         self.shared_alphas = [self.alpha1, self.alpha2, self.alpha3, self.alpha4]
 
-        # Optimizer trains both QNet and shared betas
+        self.q_network = QNet(embed_dim)
+        self.q_target  = QNet(embed_dim)
+        self.q_target.load_state_dict(self.q_network.state_dict())
+
+
         self.optimizer = optim.Adam(
-            list(self.q_network.parameters()) + self.shared_alphas, 
+            list(self.q_network.parameters()) + self.shared_alphas,
             lr=LR
         )
 
     def select_action(self, env, valid_nodes, epsilon):
-        """
-        Args:
-            valid_nodes: List of node indices that are not yet in the seed set.
-        Returns:
-            The index of the selected node.
-        """
-        # Compute the current embeddings
-        current_embeddings = env.embed.cur_embed
-        agg_embed = current_embeddings.sum(dim=0)  # Sum of all node embeddings
+        cur = env.embed.cur_embed
+        agg = cur.sum(dim=0)
 
         if random.random() < epsilon:
-            # Exploration: Choose a random valid node
             return random.choice(valid_nodes)
-        else:
-            # Exploitation: Vectorized computation of Q-values
-            # Gather embeddings for all valid nodes in one go.
-            valid_node_embeds = current_embeddings[valid_nodes]  # shape: (num_valid, embed_dim)
-            
-            # Repeat the aggregated embedding to match the number of valid nodes.
-            repeated_agg_embed = agg_embed.unsqueeze(0).expand(valid_node_embeds.size(0), -1)
-            
-            # Compute the Q-values for all valid nodes simultaneously.
-            q_values = self.q_network(valid_node_embeds, repeated_agg_embed)  # expected shape: (num_valid, 1) or (num_valid,)
-            q_values = q_values.squeeze()
-            
-            # Select the valid node with the highest Q-value.
-            best_index = q_values.argmax().item()
-            return valid_nodes[best_index]
+
+        v_emb = cur[valid_nodes]
+        a_emb = agg.unsqueeze(0).expand(v_emb.size(0), -1)
+        qv    = self.q_network(v_emb, a_emb).squeeze(1)
+        return valid_nodes[qv.argmax().item()]
 
     def train(self, batch_size, gamma=GAMMA):
         if len(self.replay_buffer) < batch_size:
             return
 
         batch = random.sample(self.replay_buffer, batch_size)
-        total_loss = 0.0
+        total_loss = []
+        #total_loss = torch.tensor(0.0, device=self.q_network.beta2.device)
 
         for state, action, reward, next_state in batch:
-            # --- Current state ---
-            # Use unsqueeze(0) so that each input has shape [1, embed_dim]
-            agg_embed = state.cur_embed.sum(dim=0, keepdim=True)       # [1, embed_dim]
-            node_embed = state.cur_embed[action].unsqueeze(0)            # [1, embed_dim]
-            q_value = self.q_network(node_embed, agg_embed)              # [1, 1]
+            agg_s    = state.cur_embed.sum(0, keepdim=True)
+            node_s   = state.cur_embed[action].unsqueeze(0)
+            q_s      = self.q_network(node_s, agg_s).squeeze(1)
 
-            # --- Next state ---
-            next_agg_embed = next_state.cur_embed.sum(dim=0, keepdim=True)  # [1, embed_dim]
-            # Build valid indices exactly as in the original (if label != 1)
-            valid_indices = [v for v in range(state.graph.num_nodes) if next_state.graph.labels[v] != 1]
-            if valid_indices:
-                # Vectorize over valid nodes: each embedding is [embed_dim]
-                valid_node_embeds = next_state.cur_embed[valid_indices]     # [num_valid, embed_dim]
-                # Repeat the aggregated embedding so each valid node gets its own copy.
-                repeated_next_agg = next_agg_embed.expand(valid_node_embeds.size(0), -1)  # [num_valid, embed_dim]
-                # Forward pass for all valid next actions
-                next_q_values = self.q_network(valid_node_embeds, repeated_next_agg)  # [num_valid, 1]
-                # Squeeze so that we have shape [num_valid]
-                next_q_values = next_q_values.squeeze(1)
-                # Detach the next-Q values to ensure target does not propagate gradients.
-                max_next_q = next_q_values.detach().max()
-            else:
-                max_next_q = torch.tensor(0.0, device=q_value.device)
+            agg_ns   = next_state.cur_embed.sum(0, keepdim=True)
+            valid    = [v for v, lbl in enumerate(next_state.graph.labels) if lbl == 0]
+            
+            v_emb_ns   = next_state.cur_embed[valid]
+            a_emb_ns   = agg_ns.expand(len(valid), -1)
+            q_next_all = self.q_target(v_emb_ns, a_emb_ns).squeeze(1).detach()
+            max_q_next = q_next_all.max()
+            
+            max_q_next = torch.tensor(0.0, device=q_s.device)
 
-            # Compute target as a scalar
-            target = reward + gamma * max_next_q
+            target = reward + gamma * max_q_next
+            total_loss.append(F.smooth_l1_loss(q_s.squeeze(), target))
+            #total_loss = total_loss + F.mse_loss(q_s, target.unsqueeze(0))
 
-            # Compute squared error loss; q_value is [1,1] so subtract target and square.
-            total_loss += (target - q_value)**2
+        # debug print
+        
 
         self.optimizer.zero_grad()
-        total_loss.backward()
+        final_loss = torch.stack(total_loss).mean()
+        print(f"[DEBUG] DQN total_loss = {final_loss.item():.4f}")
+        final_loss.backward()
         torch.nn.utils.clip_grad_norm_(
             list(self.q_network.parameters()) + self.shared_alphas,
             max_norm=10
@@ -258,7 +228,7 @@ def train_agent(agent, env, episodes, batch_size):
     torch.save({
         'q_network_state_dict': agent.q_network.state_dict(),
         'shared_alphas_state_dict': {f'alpha{i+1}': alpha for i, alpha in enumerate(agent.shared_alphas)}
-    }, 'C:\\Users\\17789\\Desktop\\New Graph Dataset\\DQN_agent(p2p1_3c1).pth')
+    }, 'C:\\Users\\17789\\Desktop\\New Graph Dataset\\DQN_agent(p2p1_3c2).pth')
 
     
 def DQN_main(num_nodes):
@@ -291,9 +261,9 @@ def DQN_main(num_nodes):
 
     agent = DQNAgent()
 
-    if os.path.exists('C:\\Users\\17789\\Desktop\\New Graph Dataset\\DQN_agent(p2p1_3c1).pth'):
+    if os.path.exists('C:\\Users\\17789\\Desktop\\New Graph Dataset\\DQN_agent(p2p1_3c2).pth'):
         print("Loading pre-trained agent...")
-        checkpoint = torch.load('C:\\Users\\17789\\Desktop\\New Graph Dataset\\DQN_agent(p2p1_3c1).pth')
+        checkpoint = torch.load('C:\\Users\\17789\\Desktop\\New Graph Dataset\\DQN_agent(p2p1_3c2).pth')
         agent.q_network.load_state_dict(checkpoint['q_network_state_dict'])
     
         # Restore shared alphas
@@ -305,7 +275,7 @@ def DQN_main(num_nodes):
     env = CustomEnv(graph, agent.shared_alphas, 10)
 
    
-    train_agent(agent, env, 10, 16)    
+    train_agent(agent, env, 10, 32)    
 
     '''
     random_avg = 0.0

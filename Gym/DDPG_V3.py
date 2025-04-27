@@ -13,75 +13,79 @@ from gymenv import CustomEnv
 from simulator import simulate, celf
 import torch.nn.utils as nn_utils
 
-# Hyper‑parameters
-REPLAY_CAPACITY = 2000
-GAMMA           = 0.99
-LR_CRITIC       = 1e-3
-LR_ACTOR        = 1e-3
-GUMBEL_TAU      = 0.75
-CLAMP_LOW       = -1.0
-CLAMP_HIGH      =  1.0
+# Hyperparameters
+REPLAY_CAPACITY = 64
+GAMMA = 0.99
+LR_ALPHAS = 0.0005
+LR_CRITIC = 0.0010   # Learning rate for critic
+LR_ACTOR = 0.0010    # Learning rate for actor
+EPSILON = 0.20
+GUMBEL_TAU = 0.75    # Temperature for Gumbel Softmax
+TAU = 0.005          # Soft update interpolation factor
 
 class QNet(nn.Module):
     def __init__(self, embed_dim=64):
-        super().__init__()
+        super(QNet, self).__init__()
         self.embed_dim = embed_dim
 
-        # critic scaling params
-        self.beta2  = nn.Parameter(torch.rand(1))
-        self.beta3  = nn.Parameter(torch.rand(1))
-        # actor  scaling params
+        # Parameters for critic and actor
+        self.beta1 = nn.Parameter(torch.rand(embed_dim * 2, 1))
+        self.beta2 = nn.Parameter(torch.rand(1))
+        self.beta3 = nn.Parameter(torch.rand(1))
+
+        self.theta1 = nn.Parameter(torch.rand(embed_dim * 2, 1))
         self.theta2 = nn.Parameter(torch.rand(1))
         self.theta3 = nn.Parameter(torch.rand(1))
 
-        # layer‑norm on the 2*embed_dim concat
-        self.ln = nn.LayerNorm(embed_dim * 2)
+        # Final linear transformations
+        self.fc1 = nn.Linear(embed_dim * 2, 1)  # Critic output
+        self.fc2 = nn.Linear(embed_dim * 2, 1)  # Actor logits
 
-        # final linear heads
-        self.fc1 = nn.Linear(embed_dim * 2, 1)  # critic
-        self.fc2 = nn.Linear(embed_dim * 2, 1)  # actor
-
-        # Xavier init + weight‑norm
+        # Xavier init + weight-norm
         nn.init.xavier_uniform_(self.fc1.weight)
-        nn.init.xavier_uniform_(self.fc2.weight)
         self.fc1 = nn_utils.weight_norm(self.fc1)
+        nn.init.xavier_uniform_(self.fc2.weight)
         self.fc2 = nn_utils.weight_norm(self.fc2)
 
     def forward(self, node_embed, agg_embed, role='critic'):
         if role == 'critic':
-            scaled_agg  = self.beta2  * agg_embed
-            scaled_node = self.beta3  * node_embed
-            head        = self.fc1
+            scaled_aggregate = self.beta2 * agg_embed
+            scaled_node      = self.beta3 * node_embed
+            combined         = torch.cat((scaled_aggregate, scaled_node), dim=1)
+            return self.fc1(F.relu(combined))
         else:
-            scaled_agg  = self.theta2 * agg_embed
-            scaled_node = self.theta3 * node_embed
-            head        = self.fc2
-
-        # 1) concat, 2) normalize, 3) ReLU, 4) final linear
-        x = torch.cat([scaled_agg, scaled_node], dim=-1)
-        x = self.ln(x)
-        x = F.relu(x)
-        return head(x)
-
+            scaled_aggregate = self.theta2 * agg_embed
+            scaled_node      = self.theta3 * node_embed
+            combined         = torch.cat((scaled_aggregate, scaled_node), dim=1)
+            return self.fc2(F.relu(combined))
 
 class DDPGAgent:
     def __init__(self, embed_dim=64):
         self.replay_buffer = deque(maxlen=REPLAY_CAPACITY)
         self.embed_dim     = embed_dim
 
-        # shared alphas for your graph embedding update
+        # shared alphas for graph embedding update
         self.alpha1 = nn.Parameter(torch.rand(1))
         self.alpha2 = nn.Parameter(torch.rand(1))
         self.alpha3 = nn.Parameter(torch.rand(1))
         self.alpha4 = nn.Parameter(torch.rand(1))
         self.shared_alphas = [self.alpha1, self.alpha2, self.alpha3, self.alpha4]
 
-        # actor & critic nets
+        # actor & critic networks
         self.actor  = QNet(embed_dim)
         self.critic = QNet(embed_dim)
+        # target networks (initialized to match the originals)
+        self.actor_target  = QNet(embed_dim)
+        self.critic_target = QNet(embed_dim)
+        self.actor_target.load_state_dict(self.actor.state_dict())
+        self.critic_target.load_state_dict(self.critic.state_dict())
+        # no gradient for targets
+        for p in self.actor_target.parameters():  p.requires_grad = False
+        for p in self.critic_target.parameters(): p.requires_grad = False
 
         # optimizers
-        self.opt_actor  = optim.Adam(self.actor.parameters(),  lr=LR_ACTOR)
+        self.opt_actor  = optim.Adam(self.actor.parameters(),  
+                                     lr=LR_ACTOR)
         self.opt_critic = optim.Adam(
             list(self.critic.parameters()) + self.shared_alphas,
             lr=LR_CRITIC
@@ -90,16 +94,13 @@ class DDPGAgent:
     def select_action(self, env, valid_nodes, epsilon):
         cur = env.embed.cur_embed
         agg = cur.sum(dim=0, keepdim=True)
-
         if random.random() < epsilon:
             return random.choice(valid_nodes)
-
-        v_emb   = cur[valid_nodes]
-        a_emb   = agg.expand(len(valid_nodes), -1)
-        logits  = self.actor(v_emb, a_emb, role='actor').squeeze(1)
-        logits  = logits - logits.max()  # numerical stability
-        # hard=True => returns a one-hot but backpropagates through the soft sample
-        one_hot = F.gumbel_softmax(logits, tau=GUMBEL_TAU, hard=True, dim=-1)
+        v_emb  = cur[valid_nodes]
+        a_emb  = agg.expand(len(valid_nodes), -1)
+        logits = self.actor(v_emb, a_emb, role='actor').squeeze(1)
+        logits = logits - logits.max()
+        one_hot = F.gumbel_softmax(logits, tau=GUMBEL_TAU, hard=False, dim=-1)
         idx     = one_hot.argmax().item()
         return valid_nodes[idx]
 
@@ -115,25 +116,27 @@ class DDPGAgent:
         if len(self.replay_buffer) < batch_size:
             return
 
-        # --- Critic update ---
+        # --- Critic update using target network ---
         self.opt_critic.zero_grad()
         critic_losses = []
         batch = random.sample(self.replay_buffer, batch_size)
         for s, a, r, ns in batch:
-            agg_s  = s.cur_embed.sum(0, keepdim=True)
-            q_s    = self.critic(s.cur_embed[a].unsqueeze(0), agg_s, role='critic')
+            agg_s = s.cur_embed.sum(0, keepdim=True)
+            q_s   = self.critic(s.cur_embed[a].unsqueeze(0), agg_s, role='critic')
 
             agg_ns = ns.cur_embed.sum(0, keepdim=True)
             valid  = [i for i, lbl in enumerate(ns.graph.labels) if lbl == 0]
-            qn     = self.critic(
+            # use critic_target for next‐state Q
+            qn = self.critic_target(
                 ns.cur_embed[valid],
                 agg_ns.expand(len(valid), -1),
                 role='critic'
             ).detach().max()
             target = r + gamma * qn
-            critic_losses.append(F.mse_loss(q_s, target.unsqueeze(0).unsqueeze(0)))
+            critic_losses.append(F.smooth_l1_loss(q_s.squeeze(), target))
 
         loss_c = torch.stack(critic_losses).mean()
+        print(f"[DEBUG] Critic loss = {loss_c.item():.4f}")
         loss_c.backward()
         torch.nn.utils.clip_grad_norm_(
             list(self.critic.parameters()) + self.shared_alphas,
@@ -141,11 +144,7 @@ class DDPGAgent:
         )
         self.opt_critic.step()
 
-        # clamp critic’s scale params
-        self.critic.beta2.data.clamp_(CLAMP_LOW, CLAMP_HIGH)
-        self.critic.beta3.data.clamp_(CLAMP_LOW, CLAMP_HIGH)
-
-        # --- Actor update ---
+        # --- Actor update (unchanged TD target, but you could use target networks similarly) ---
         self.opt_actor.zero_grad()
         actor_losses = []
         for s, a, r, ns in batch:
@@ -156,21 +155,19 @@ class DDPGAgent:
 
             logits = self.actor(v_emb, a_emb, role='actor').squeeze(1)
             logits = logits - logits.max()
-            # hard=False => smooth distribution for gradient flow
             probs  = F.gumbel_softmax(logits, tau=GUMBEL_TAU, hard=False, dim=-1)
             logp   = torch.log(probs + 1e-8)
 
-            # same TD‑target as critic
             agg_ns    = ns.cur_embed.sum(0, keepdim=True)
             valid_nxt = [i for i, lbl in enumerate(ns.graph.labels) if lbl == 0]
-            qn        = self.critic(
+            # still using critic_target for stability
+            qn = self.critic_target(
                 ns.cur_embed[valid_nxt],
                 agg_ns.expand(len(valid_nxt), -1),
                 role='critic'
             ).detach().max()
             targ = r + gamma * qn
 
-            # advantage = targ - Q(s, each_node)
             advs = []
             for node in valid:
                 qv = self.critic(
@@ -184,6 +181,7 @@ class DDPGAgent:
             actor_losses.append(-(logp * adv).sum())
 
         loss_a = torch.stack(actor_losses).mean()
+        print(f"[DEBUG] Actor loss = {loss_a.item():.4f}")
         loss_a.backward()
         torch.nn.utils.clip_grad_norm_(
             self.actor.parameters(),
@@ -191,9 +189,13 @@ class DDPGAgent:
         )
         self.opt_actor.step()
 
-        # clamp actor’s scale params
-        self.actor.theta2.data.clamp_(CLAMP_LOW, CLAMP_HIGH)
-        self.actor.theta3.data.clamp_(CLAMP_LOW, CLAMP_HIGH)
+        # --- Soft update target networks ---
+        for src, tgt in zip(self.critic.parameters(), self.critic_target.parameters()):
+            tgt.data.mul_(1.0 - TAU)
+            tgt.data.add_(src.data * TAU)
+        for src, tgt in zip(self.actor.parameters(), self.actor_target.parameters()):
+            tgt.data.mul_(1.0 - TAU)
+            tgt.data.add_(src.data * TAU)
 
     def evaluate(self, env, budget):
         start_time = time.time()
@@ -203,7 +205,7 @@ class DDPGAgent:
         q_list = []
         for v in range(env.embed.graph.num_nodes):
             node_embed = env.embed.cur_embed[v]
-            q_value = self.actor(node_embed.unsqueeze(0), agg_embed.unsqueeze(0), role='actor').item()
+            q_value = self.critic(node_embed.unsqueeze(0), agg_embed.unsqueeze(0), role='actor').item()
             q_list.append((q_value, v))
         q_list.sort(reverse=True)
 
@@ -267,7 +269,7 @@ def train_agent(agent, env, episodes, batch_size, epsilon):
             
             # Apply the action 
             state, reward, done, _ = env.step(action)
-            print(f"[TRAIN] picked {action}, reward = {reward}")
+            #print(f"[TRAIN] picked {action}, reward = {reward}")
             # Add the experience to the replay buffer
             agent.add_experience(orig_state, action, reward, state)
 
@@ -289,7 +291,7 @@ def train_agent(agent, env, episodes, batch_size, epsilon):
         'actor_state_dict': agent.actor.state_dict(),  # Save actor network
         'critic_state_dict': agent.critic.state_dict(),  # Save critic network
         'shared_alphas_state_dict': {f'alpha{i+1}': alpha for i, alpha in enumerate(agent.shared_alphas)},
-    }, 'C:\\Users\\17789\\Desktop\\New Graph Dataset\\DDPG_agent(p2p1_3c1).pth')
+    }, 'C:\\Users\\17789\\Desktop\\New Graph Dataset\\DDPG_agent(p2p1_3c2).pth')
 
 
     
@@ -322,9 +324,9 @@ def DDPG_main(num_nodes):
     epsilon = 0.30  # Default exploration rate
 
     # Load pre-trained model if it exists
-    if os.path.exists('C:\\Users\\17789\\Desktop\\New Graph Dataset\\DDPG_agent(p2p1_3c1).pth'):
+    if os.path.exists('C:\\Users\\17789\\Desktop\\New Graph Dataset\\DDPG_agent(p2p1_3c2).pth'):
         print("Loading pre-trained agent...")
-        checkpoint = torch.load('C:\\Users\\17789\\Desktop\\New Graph Dataset\\DDPG_agent(p2p1_3c1).pth')
+        checkpoint = torch.load('C:\\Users\\17789\\Desktop\\New Graph Dataset\\DDPG_agent(p2p1_3c2).pth')
         
         # Load Q-network (betas and thetas included)
         agent.actor.load_state_dict(checkpoint['actor_state_dict'])
@@ -344,7 +346,7 @@ def DDPG_main(num_nodes):
     env = CustomEnv(graph, agent.shared_alphas, 10)
 
     # Train the agent
-    train_agent(agent, env, 10, 16, epsilon)
+    train_agent(agent, env, 10, 32, epsilon)
 
     # Evaluate random selection strategy for comparison
 
