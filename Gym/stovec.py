@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from custom_graph import Graph
+from Gym.custom_graph import Graph
 import copy
 
 class Embed(nn.Module):

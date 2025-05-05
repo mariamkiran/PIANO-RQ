@@ -7,10 +7,10 @@ import random
 import os
 from collections import deque
 import heapq
-from custom_graph import Graph
-from stovec import Embed
-from gymenv import CustomEnv
-from simulator import simulate, celf
+from Gym.custom_graph import Graph
+from Gym.stovec import Embed
+from Gym.gymenv import CustomEnv
+from Gym.simulator import simulate, celf
 import torch.nn.utils as nn_utils
 
 # Hyperparameters

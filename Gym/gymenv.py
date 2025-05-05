@@ -2,9 +2,9 @@ import gym
 from gym import spaces
 import numpy as np
 import torch
-from custom_graph import Graph
-from stovec import Embed
-from simulator import simulate
+from Gym.custom_graph import Graph
+from Gym.stovec import Embed
+from Gym.simulator import simulate
 #torch.set_default_device('cuda')
 
 class CustomEnv(gym.Env):

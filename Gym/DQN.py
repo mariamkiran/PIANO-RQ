@@ -7,11 +7,11 @@ import random
 import os
 from collections import deque
 
-from custom_graph import Graph
-from stovec import Embed
-from gymenv import CustomEnv
-from simulator import simulate
-from simulator import celf
+from Gym.custom_graph import Graph
+from Gym.stovec import Embed
+from Gym.gymenv import CustomEnv
+from Gym.simulator import simulate
+from Gym.simulator import celf
 
 
 #hyperparameters

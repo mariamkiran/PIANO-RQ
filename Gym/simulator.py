@@ -1,4 +1,4 @@
-from custom_graph import Graph
+from Gym.custom_graph import Graph
 import random
 import heapq
 import time

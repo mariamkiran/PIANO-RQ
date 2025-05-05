@@ -1,2 +1,16 @@
-text
+# Byte-compiled / optimized / DLL files
+__pycache__/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+data_loader/__MACOSX
+venv/
+**__pycache__
+lib/
+bin/
+*.zip
+default.npy
+runs/
+*.pt
+.DS_Store
 
